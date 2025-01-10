@@ -5,4 +5,4 @@ My EPQ Project - An agent-based economic simulator, with a focus on experimentin
 
 **License**
 
-This project used the "Creative Commons Attribution-NonCommercial-NoDerivatives" lisence.
+This project used the "Creative Commons Attribution-NonCommercial-NoDerivatives" license.
