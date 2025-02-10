@@ -44,6 +44,7 @@ class economicAgent:
         economy.agents.append(self)
 
     def changeCash(self, amount):
+        global transactionMessages
         self.cash += amount
         debug = True
         if debug == True:
@@ -53,7 +54,7 @@ class economicAgent:
                     readableAmount = f"-{self.economy.currencySymbol}{roundedAmount*-1}"
                 elif roundedAmount > 0:
                     readableAmount = f"{self.economy.currencySymbol}{roundedAmount}"
-                print(f"{self.name} having transaction of {readableAmount} applied")
+                transactionMessages.append(f"{self.name} having transaction of {readableAmount} applied")
 
 class economy:
     def __init__(self, name, population=0, totalCurrencyCirculation=0.0, currencySymbol="$"):
@@ -272,17 +273,22 @@ class consumer(economicAgent):
 
     
     def meetNeeds(self):
+        global actionMessages
+        global transactionMessages
         # Step 1: Find all the needs which are not met, which do not have goods
         lackingNeedGoods = self.determineLackingNeedGoods()
-
         # Step 2: For each need which is false, and no corresponding good, buy the good
         for lackingNeedGood in lackingNeedGoods:
             success = self.buyGoodType(lackingNeedGood, 1)
             if success == True:
-                print(f"{self.name} bought their {lackingNeedGood}")
+                actionMessages.append(f"{self.name} bought their {lackingNeedGood}")
             elif success == False:
-                print(f"{self.name} is unable to buy their {lackingNeedGood} due to a lack of stock")
-            
+                actionMessages.append(f"{self.name} is unable to buy their {lackingNeedGood} due to a lack of stock")
+            print("\n" + actionMessages[0])
+            for transaction in transactionMessages:
+                print(f"    {transaction}")
+            actionMessages = []
+            transactionMessages = []
 
         for lackingNeed in self.determineLackingNeeds():
             consumed = self.consumeGood(lackingNeed)
@@ -346,6 +352,7 @@ class firm(economicAgent):
             self.blueprintInputGood = good('construction-material', economy, 1, 'material', 1, 0, False)
 
     def changeTaxBeingHeld(self, amount):
+        global transactionMessages
         self.taxBeingHeld += amount
         debug = True
         if debug == True:
@@ -355,9 +362,10 @@ class firm(economicAgent):
                     readableAmount = f"-{self.economy.currencySymbol}{roundedAmount*-1}"
                 elif roundedAmount > 0:
                     readableAmount = f"{self.economy.currencySymbol}{roundedAmount}"
-                print(f"{self.name} effect of {readableAmount} applied to VAT collections.")
+                transactionMessages.append(f"{self.name} effect of {readableAmount} applied to VAT collections.")
 
     def changeVATReclaimable(self, amount):
+        global transactionMessages
         self.VATreclaimable += amount
         debug = True
         if debug == True:
@@ -367,7 +375,7 @@ class firm(economicAgent):
                     readableAmount = f"-{self.economy.currencySymbol}{roundedAmount*-1}"
                 elif roundedAmount > 0:
                     readableAmount = f"{self.economy.currencySymbol}{roundedAmount}"
-                print(f"{self.name} effect of {readableAmount} applied to possible VAT reclaimable amount.")
+                transactionMessages.append(f"{self.name} effect of {readableAmount} applied to possible VAT reclaimable amount.")
 
     def changeInventory(self, amount: int):
         if amount > 0:
@@ -445,8 +453,8 @@ class firm(economicAgent):
 
         transferAmount = self.VATreclaimable
         self.economy.government.changeCash((-1*transferAmount))
-        self.changeVATReclaimable((-1*transferAmount))
         self.changeCash(transferAmount)
+        self.VATreclaimable = 0
 
         self.lastUpdateOrders = self.orders
         self.orders = 0
@@ -478,6 +486,7 @@ class firm(economicAgent):
         return math.ceil(self.lastUpdateOrders*self.inputRule) - (len(self.inputGoods))
 
     def buyInputGoodType(self, goodName, amount):
+        global actionMessages
         previousInputGoods = len(self.inputGoods)
         done = False
         for agent in self.economy.agents:
@@ -489,9 +498,9 @@ class firm(economicAgent):
                     
 
         if done == True:
-            print(f"{self.name} is automatically ordering {amount} of {self.blueprintInputGood.name} from {agentName} ({agentStock})")
+            actionMessages.append(f"{self.name} is automatically ordering {amount} of {self.blueprintInputGood.name} from {agentName} ({agentStock})")
         elif done == False:
-            print(f"{self.name} is unable to order {amount} of {self.blueprintInputGood.name} from {agentName} likely due to a lack of their stock ({agentStock})")
+            actionMessages.append(f"{self.name} is unable to order {amount} of {self.blueprintInputGood.name} from {agentName} likely due to a lack of their stock ({agentStock})")
 
     def autoOrderInputGoods(self):
         amountNeeded = self.amountNeededFromSuppliers()
@@ -511,23 +520,25 @@ class firm(economicAgent):
                     complete = True
 
     def autoHireLabour(self):
+        global actionMessages
         labourNeeded = self.estimateLabourNeed()
         amountShortOnLabour = labourNeeded - self.totalWorkers
         
         if amountShortOnLabour > 0:
-            print(f"{self.name} is automatically taking on {amountShortOnLabour} workers")
+            actionMessages.append(f"{self.name} is automatically taking on {amountShortOnLabour} workers")
             for i in range(amountShortOnLabour):
                 self.findAndHireWorker() # Find the worket and hire them for one update
 
     def autoProduce(self):
+        global actionMessages
         previousInventory = len(self.inventory)
         amountToProduce = self.lastUpdateOrders # business will produce the amount of goods ordered last update
         
         sucessfullProduction = self.produce(amountToProduce)
         if len(self.inventory) > previousInventory and sucessfullProduction == True:
-            print(f"{self.name} is automatically producing {amountToProduce} of {self.blueprintOutputGood.name}")
+            actionMessages.append(f"{self.name} is automatically producing {amountToProduce} of {self.blueprintOutputGood.name}")
         elif sucessfullProduction == False:
-            print(f"{self.name} is failed to produce {amountToProduce} of {self.blueprintOutputGood.name}")
+            actionMessages.append(f"{self.name} is failed to produce {amountToProduce} of {self.blueprintOutputGood.name}")
 
     def autoManage(self):
         self.autoOrderInputGoods()
@@ -547,7 +558,31 @@ class simulation:
             newConsumer = consumer(self.economy, get_random_string(8), startingMoney)
             self.consumers.append(newConsumer)
 
+    def outputActionsAndTransactions(self, noAction=None):
+        global actionMessages
+        global transactionMessages
+        if noAction == None:
+            noAction = False
+
+        if noAction == False:
+            if actionMessages != []:
+                print("\n" + actionMessages[0])
+                for transaction in transactionMessages:
+                    print(f"    {transaction}")
+                actionMessages = []
+                transactionMessages = []
+        elif noAction == True:
+            print("\n" + "Taxes:")
+            for transaction in transactionMessages:
+                print(f"    {transaction}")
+            actionMessages = []
+            transactionMessages = []
+
     def cycle(self):
+        global transactionMessages
+        global actionMessages
+        transactionMessages = []
+        actionMessages = []
         # Firstly we need to look at consumers. consumers first drive the needs of the economy, which afects decisions later on in the cycle.
         for agent in self.economy.agents:
             if agent.type == "consumer":
@@ -557,21 +592,25 @@ class simulation:
         for agent in self.economy.agents:
             if agent.type == "firm":
                 agent.autoHireLabour()
+                self.outputActionsAndTransactions()
                 agent.autoProduce()
+                self.outputActionsAndTransactions()
                 agent.autoOrderInputGoods()
+                self.outputActionsAndTransactions()
 
         self.economy.update_all()
+        self.outputActionsAndTransactions(noAction=True)
         # This specific order of making sure we do all production before supply chain movements is key to minimising the amount of cycles it takes to establish supply chains
 
         if checkList['bread'] == True:
-            print("Food supply chain has been established")
+            print("\nFood supply chain has been established")
 
         elif checkList['bread'] == False:
-            print("Food supply chain has not been established")
+            print("\nFood supply chain has not been established")
 
     def commandLineCycles(self, noOfCycles):
         for i in range(noOfCycles):
-            print(f"\nCycle {i+1}")
+            print(f"\n\nCycle {i+1}")
             self.cycle()
 
 
@@ -596,9 +635,9 @@ myFarm = firm(UK, "Bob's Farm", 40, None, "wheat", 30)
 bakery = firm(UK, "Bob's Bakery", 40, "wheat", "bread", 30)
 
 # Housing Supply Chain
-#myLoggingCompany = firm(UK, "Bob's Logging Company", 200, None, "wood", 30)
-#constructionMaterialsProducer = firm(UK, "Bob's Construction Materials", 200, "wood", "construction-material", 30)
-#bobTHEBUILDERCANHEFIXIT = firm(UK, "Bob's Builders", 2000, "construction-material", "house", 0.1)
+myLoggingCompany = firm(UK, "Bob's Logging Company", 200, None, "wood", 30)
+constructionMaterialsProducer = firm(UK, "Bob's Construction Materials", 200, "wood", "construction-material", 30)
+bobTHEBUILDERCANHEFIXIT = firm(UK, "Bob's Builders", 2000, "construction-material", "house", 0.1)
 
 mySimulation = simulation("UK Simulation", UK)
 
