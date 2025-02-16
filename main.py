@@ -28,7 +28,7 @@ def get_random_string(length):
     return result_str
 
 class good:
-    def __init__(self, name, economy, baseValue, type, PED, QL, necessity, perishable=True, rentalProvider=None):
+    def __init__(self, name, economy, baseValue, type, PED, QL, necessity, perishable=True, rentalProvider=None, maxUses=None):
         self.name = name
         self.baseValue = baseValue
         self.type = type
@@ -39,6 +39,7 @@ class good:
         self.perishable = perishable # eg houses when consumed, continue to exist etc. but food doesnt
         self.rentalProvider = rentalProvider # eg houses can be rented out, but food cannot
         self.recommendedPrice = 0
+        self.maxUses = maxUses
 
     def fetchPrice(self):
         if self.recommendedPrice == 0:
@@ -46,9 +47,6 @@ class good:
         elif self.recommendedPrice > 0:
             price = self.recommendedPrice
 
-        # Price after this is after tax
-        if self.economy.government != None:
-            price = price * (1 + self.economy.government.VATrate)
         return price
 
 class economicAgent:
@@ -90,6 +88,7 @@ class economy:
         self.update()
         for agent in self.agents:
             agent.update()
+            simulation.outputActionsAndTransactions(self.currencySymbol, noAction=True)
 
     def getConsumers(self):
         consumers = []
@@ -190,11 +189,16 @@ class consumer(economicAgent):
             self.changeCash(-1 * (amount*price))
             firm.changeInventory((-1 * amount))
             firm.changeCash(amount*price-VATdue)
+            firm.cycleRevenue += (amount*price-VATdue)
             firm.changeTaxBeingHeld(VATdue)
             for i in range(amount):
                 self.goods.append(firm.blueprintOutputGood)
                 firm.orders += 1
             bought = True
+
+            if firm.blueprintOutputGood.rentalProvider != None:
+                firm.rentalsSold += amount
+
         else:
             firm.orders += amount
 
@@ -220,7 +224,6 @@ class consumer(economicAgent):
             if good.rentalProvider != None:
                 rentalFirm = self.economy.fetchAgent(good.rentalProvider)
                 rentalFirm.inventory.append(good)
-                rentalFirm.orders -= 1
                 self.goods.remove(good)
 
         self.amountWorkedThisUpdate = 0
@@ -299,12 +302,8 @@ class consumer(economicAgent):
                 actionMessages.append(f"{self.name} bought their {lackingNeedGood}")
             elif success == False:
                 actionMessages.append(f"{self.name} is unable to buy their {lackingNeedGood} due to a lack of stock")
+            simulation.outputActionsAndTransactions(self.economy.currencySymbol)
             
-            log("\n" + actionMessages[0])
-            for transaction in transactionMessages:
-                log(f"    {transaction}")
-            actionMessages = []
-            transactionMessages = []
 
         for lackingNeed in self.determineLackingNeeds():
             consumed = self.consumeGood(lackingNeed)
@@ -316,7 +315,7 @@ class consumer(economicAgent):
 
 class firm(economicAgent):
 
-    def __init__(self, economy, name, cash, inputGoodName, outputGoodName, outputPerWorker, goods=None, inventory=None):
+    def __init__(self, economy, name, cash, inputGoodName, outputGoodName, outputPerWorker, goods=None, inventory=None, partialInventory=None):
         if goods == None:
             goods = []
         if inventory == None:
@@ -332,11 +331,15 @@ class firm(economicAgent):
         self.totalWorkers = 0
         self.outputPerWorker = outputPerWorker
         self.inputGoods = []
+        self.cycleRevenue = 0
 
         self.orders = 0 # The amount times the buyGood or sellGood function has been called over this firm. this will help them to anticipate demand and buy the suitable amount of input goods
         self.lastUpdateOrders = 0
+        self.rentalsSold = 0
+        if partialInventory == None:
+            self.partialInventory = 0
 
-        self.cycleCosts = 0 # The amount of money spent on expenditure in a cycle. this is neeeded to help the business set prices
+        self.costOfProductionToBeCovered = 0 # The amount of money spent on expenditure in a cycle. this is neeeded to help the business set prices
 
         # we also need a base wage for every single kind of business. excluding labour costs curetlly at maximum EOS, 600% profit is possible, 15% makes more sense
 
@@ -352,15 +355,15 @@ class firm(economicAgent):
         elif outputGoodName == "wood":
             self.blueprintOutputGood = good('wood', economy, 0.5, 'raw', 1, 0, False)
             self.inputRule = 0
-            self.baseWage = 12.20
+            self.baseWage = 17.20
         elif outputGoodName == "construction-material":
             self.blueprintOutputGood = good('construction-material', economy, 1, 'material', 1, 0, False)
-            self.inputRule = 3
-            self.baseWage = 12.20
+            self.inputRule = 6
+            self.baseWage = 18.20
         elif outputGoodName == "house":
             self.blueprintOutputGood = good('house', economy, 10, 'accomodation', 0.25, 100, True, perishable=False, rentalProvider=self.name)
-            self.inputRule = 25
-            self.baseWage = 15.20
+            self.inputRule = 800
+            self.baseWage = 20.20
 
         if inputGoodName == "wheat":
             self.blueprintInputGood = good('wheat', economy, 0.25, 'raw', 1, 0, False)
@@ -428,10 +431,14 @@ class firm(economicAgent):
             consumer.changeCash(-1 * (amount*price))
             self.changeInventory((-1 * amount))
             self.changeCash((amount*price-VATdue))
+            self.cycleRevenue += (amount*price-VATdue)
             self.changeTaxBeingHeld(VATdue)
             for i in range(amount):
                 consumer.goods.append(self.blueprintOutputGood)
                 self.orders += 1
+
+            if self.blueprintOutputGood.rentalProvider != None:
+                self.rentalsSold += amount
         else:
             self.orders += amount
 
@@ -441,21 +448,47 @@ class firm(economicAgent):
     
     def produce(self, amount:int):
         productionSuccessful = False
-        inputGoodsNeeded = self.calculateInputNeed(amount)
-        if inputGoodsNeeded > len(self.inputGoods) or (self.totalWorkers*self.outputPerWorker) < amount:
-            maximumOutputPossibleInput = math.floor(len(self.inputGoods) / self.inputRule)
-            maximumOutputPossibleOutputWorker = math.floor(self.totalWorkers * self.outputPerWorker)
-            maximumOutputPossible = min(maximumOutputPossibleInput, maximumOutputPossibleOutputWorker)
-            inputGoodsNeeded = self.calculateInputNeed(maximumOutputPossible)
-            self.changeInputGoods(-1*inputGoodsNeeded)
-            productionSuccessful = False
-            self.changeInventory(maximumOutputPossible)
+        if self.outputPerWorker >= 1:
+            inputGoodsNeeded = self.calculateInputNeed(amount)
+            if inputGoodsNeeded > len(self.inputGoods) or (self.totalWorkers*self.outputPerWorker) < amount:
+                if self.inputRule != 0:
+                    maximumOutputPossibleInput = math.floor(len(self.inputGoods) / self.inputRule)
+                    maximumOutputPossibleOutputWorker = math.floor(self.totalWorkers * self.outputPerWorker)
+                    maximumOutputPossible = min(maximumOutputPossibleInput, maximumOutputPossibleOutputWorker)
+                    inputGoodsNeeded = self.calculateInputNeed(maximumOutputPossible)
+                    self.changeInputGoods(-1*inputGoodsNeeded)
+                elif self.inputRule == 0:
+                    maximumOutputPossible = math.floor(self.totalWorkers * self.outputPerWorker)
+                productionSuccessful = False
+                self.changeInventory(maximumOutputPossible)
 
-        elif inputGoodsNeeded <= len(self.inputGoods) and (self.totalWorkers*self.outputPerWorker) >= amount:
-            # We do have enough input goods.
-            self.changeInputGoods(-1*inputGoodsNeeded)
-            productionSuccessful = True
-            self.changeInventory(amount)
+            elif inputGoodsNeeded <= len(self.inputGoods) and (self.totalWorkers*self.outputPerWorker) >= amount:
+                # We do have enough input goods.
+                self.changeInputGoods(-1*inputGoodsNeeded)
+                productionSuccessful = True
+                self.changeInventory(amount)
+
+
+        elif self.outputPerWorker < 1:
+            inputGoodsNeeded = self.calculateInputNeed(amount)
+            if inputGoodsNeeded > len(self.inputGoods) and (self.totalWorkers*self.outputPerWorker) >= amount:
+                self.changeInputGoods(-1*inputGoodsNeeded)
+                productionSuccessful = True
+                self.changeInventory(amount)
+            elif inputGoodsNeeded > len(self.inputGoods) or (self.totalWorkers*self.outputPerWorker) < amount:
+                maximumOutputPossibleFromInput = math.floor(len(self.inputGoods) / self.inputRule)
+                maximumOutputPossibleFromOutputWorker = self.totalWorkers * self.outputPerWorker
+                maximumOutputPossible = min(maximumOutputPossibleFromInput, maximumOutputPossibleFromOutputWorker)
+                inputGoodsNeeded = self.calculateInputNeed(maximumOutputPossible)
+                self.changeInputGoods(-1*inputGoodsNeeded)
+                production = False
+                self.partialInventory += maximumOutputPossible
+
+        amountThatCanBeConverted = math.floor(self.partialInventory)
+        self.partialInventory -= amountThatCanBeConverted
+        self.changeInventory(amountThatCanBeConverted)
+
+
         return productionSuccessful
 
     def hire(self, employee, wage: int):
@@ -466,35 +499,50 @@ class firm(economicAgent):
             netPay = wage - taxDue
 
             self.changeCash((-1*wage))
-            self.cycleCosts += wage
+            self.costOfProductionToBeCovered += wage
             employee.changeCash(netPay)
             self.totalWorkers += 1
             employee.amountWorkedThisUpdate += 1
 
     def update(self):
         self.totalWorkers = 0
-
         self.economy.government.changeCash(self.taxBeingHeld)
         self.taxBeingHeld = 0
 
         transferAmount = self.VATreclaimable
+        
         self.economy.government.changeCash((-1*transferAmount))
         self.changeCash(transferAmount)
-        self.cycleCosts -= transferAmount
+        self.costOfProductionToBeCovered -= transferAmount
         self.VATreclaimable = 0
 
         self.lastUpdateOrders = self.orders
         
+        # PRICE DETERMINATION FOR NEXT CYCLE
 
         profitMargin = 0.1
 
-        if self.lastUpdateOrders != 0:
-            self.blueprintOutputGood.recommendedPrice = (((self.cycleCosts) * (profitMargin+1))/self.lastUpdateOrders)*(self.economy.government.VATrate+1)
-        else:
-            self.blueprintOutputGood.recommendedPrice = (((self.cycleCosts) * (profitMargin+1)))*(self.economy.government.VATrate+1)
+        if self.blueprintOutputGood.rentalProvider == None: # Price is payed upfront
+            if self.lastUpdateOrders != 0:
+                self.blueprintOutputGood.recommendedPrice = (((self.costOfProductionToBeCovered) * (profitMargin+1))/(self.lastUpdateOrders))*(self.economy.government.VATrate+1)
+            else:
+                self.blueprintOutputGood.recommendedPrice = (((self.costOfProductionToBeCovered) * (profitMargin+1)))*(self.economy.government.VATrate+1)
+
+        elif self.blueprintOutputGood.rentalProvider != None: # Price is not the market value of the good
+            # if self.blueprintOutputGood.maxUses != None: would be for goods that can be consumed multiple but not unlimited amount of times
+            if self.blueprintOutputGood.maxUses == None: # Goods that are not having theeir value payed every cycle, and can be used unlimited times eg houses
+                if (len(self.inventory)+self.partialInventory) != 0:
+                    marketValueUpfront = self.costOfProductionToBeCovered/(len(self.inventory)+self.partialInventory)
+                    # Houses take average 20 years of rent to total the value of the house. That's 1040 weeks
+                    weeklyValue = marketValueUpfront / 1040
+                    self.blueprintOutputGood.recommendedPrice = weeklyValue*(profitMargin+1)*(self.economy.government.VATrate+1)
 
         self.orders = 0
-        self.cycleCosts = 0
+        self.costOfProductionToBeCovered = self.costOfProductionToBeCovered - self.cycleRevenue
+        if self.costOfProductionToBeCovered < 0:
+            self.costOfProductionToBeCovered = 0
+        self.rentalsSold = 0
+        self.cycleRevenue = 0
 
         
 
@@ -509,10 +557,11 @@ class firm(economicAgent):
 
             self.changeVATReclaimable(VATdue) # Add the VAT due paid on input goods to reclaimable VAT
             self.changeCash(-1 * (amount*price)) # Take a way the cash the value of the money
-            self.cycleCosts += (amount*price)
+            self.costOfProductionToBeCovered += (amount*price)
             firm.changeInventory((-1 * amount)) # Reduce the output goods 
             firm.orders += amount
             firm.changeCash(amount*price-VATdue)
+            firm.cycleRevenue += (amount*price-VATdue)
             firm.changeTaxBeingHeld(VATdue)
 
             self.changeInputGoods(amount)
@@ -523,7 +572,7 @@ class firm(economicAgent):
         return success
         
     def amountNeededFromSuppliers(self):
-        return math.ceil(self.lastUpdateOrders*self.inputRule) - (len(self.inputGoods))
+        return math.ceil((self.lastUpdateOrders-self.rentalsSold)*self.inputRule) - (len(self.inputGoods))
 
     def buyInputGoodType(self, goodName, amount):
         global actionMessages
@@ -548,7 +597,7 @@ class firm(economicAgent):
             self.buyInputGoodType(self.blueprintInputGood.name, amountNeeded)
 
     def estimateLabourNeed(self):
-        return math.ceil(self.lastUpdateOrders / self.outputPerWorker)
+        return math.ceil((self.lastUpdateOrders-self.rentalsSold) / self.outputPerWorker)
     
     def findAndHireWorker(self):
         complete = False
@@ -565,20 +614,21 @@ class firm(economicAgent):
         amountShortOnLabour = labourNeeded - self.totalWorkers
         
         if amountShortOnLabour > 0:
-            actionMessages.append(f"{self.name} is automatically taking on {amountShortOnLabour} workers. ({self.totalWorkers})")
+            previousWorkers = self.totalWorkers
             for i in range(amountShortOnLabour):
                 self.findAndHireWorker() # Find the worket and hire them for one update
+            actionMessages.append(f"{self.name} has taken on {self.totalWorkers-previousWorkers} workers. It wanted to take on {amountShortOnLabour} workers.")
 
     def autoProduce(self):
         global actionMessages
         previousInventory = len(self.inventory)
-        amountToProduce = self.lastUpdateOrders # business will produce the amount of goods ordered last update
+        amountToProduce = self.lastUpdateOrders-self.rentalsSold # business will produce the amount of goods ordered last update
         
         sucessfullProduction = self.produce(amountToProduce)
         if len(self.inventory) > previousInventory and sucessfullProduction == True:
             actionMessages.append(f"{self.name} is automatically producing {amountToProduce} of {self.blueprintOutputGood.name}")
         elif sucessfullProduction == False:
-            actionMessages.append(f"{self.name} is failed to produce {amountToProduce} of {self.blueprintOutputGood.name}. Inventory Now: {len(self.inventory)}")
+            actionMessages.append(f"{self.name} has failed to produce {amountToProduce} of {self.blueprintOutputGood.name}. Inventory Now: {len(self.inventory)+self.partialInventory}")
 
     def autoManage(self):
         self.autoOrderInputGoods()
@@ -589,16 +639,14 @@ class simulation:
     def __init__(self, name, economy):
         self.name = name
         self.economy = economy # Could change this later to support multiple economies eg globalisation
-        self.consumers = []
 
-    def initialiseConsumers(self):
-        population = self.economy.population
+    def makeConsumers(self, population):
         startingMoney = self.economy.totalCurrencyCirculation / population
         for i in range(population):
-            newConsumer = consumer(self.economy, get_random_string(8), startingMoney)
-            self.consumers.append(newConsumer)
+            consumer(self.economy, get_random_string(8), startingMoney)
 
-    def outputActionsAndTransactions(self, noAction=None, fileName='output.txt'):
+    @classmethod
+    def outputActionsAndTransactions(cls, currencySymbol, noAction=None, fileName='output.txt'):
         if os.path.exists(fileName):
             myFile = open(fileName, 'a')
         else:
@@ -628,19 +676,32 @@ class simulation:
                 for key in transactionTotals.keys():
                     amount = round(transactionTotals[key], 2)
                     if amount < 0:
-                        myFile.write(f"\n    {key} having transaction of -{self.economy.currencySymbol}{-1*amount} applied.")
+                        myFile.write(f"\n    {key} having transaction of -{currencySymbol}{-1*amount} applied.")
                     if amount > 0:
-                        myFile.write(f"\n    {key} having transaction of {self.economy.currencySymbol}{amount} applied.")
+                        myFile.write(f"\n    {key} having transaction of {currencySymbol}{amount} applied.")
 
-                actionMessages = []
-                transactionMessages = []
+                
 
         elif noAction == True:
-            myFile.write("\n\n" + "Taxes:")
+            transactionTotals = {}
             for transaction in transactionMessages:
-                myFile.write(f"\n    {transaction}")
-            actionMessages = []
-            transactionMessages = []
+                if isinstance(transaction, str):
+                    myFile.write(f"\n    {transaction}")
+                if isinstance(transaction, list):
+                    if transaction[0] in transactionTotals.keys():
+                        transactionTotals[transaction[0]] += transaction[1]
+                    else:
+                        transactionTotals[transaction[0]] = transaction[1]
+
+            for key in transactionTotals.keys():
+                amount = round(transactionTotals[key], 2)
+                if amount < 0:
+                    myFile.write(f"\n    {key} having transaction of -{currencySymbol}{-1*amount} applied.")
+                if amount > 0:
+                    myFile.write(f"\n    {key} having transaction of {currencySymbol}{amount} applied.")
+
+        transactionMessages = []
+        actionMessages = []
 
         myFile.close()
 
@@ -658,24 +719,20 @@ class simulation:
         for agent in self.economy.agents:
             if agent.type == "firm":
                 agent.autoHireLabour()
-                self.outputActionsAndTransactions()
+                simulation.outputActionsAndTransactions(self.economy.currencySymbol)
                 agent.autoProduce()
-                self.outputActionsAndTransactions()
+                simulation.outputActionsAndTransactions(self.economy.currencySymbol)
                 agent.autoOrderInputGoods()
-                self.outputActionsAndTransactions()
+                simulation.outputActionsAndTransactions(self.economy.currencySymbol)
                 
 
+        log("\nTaxes:")
         self.economy.update_all()
-        self.outputActionsAndTransactions(noAction=True)
+        
 
         
         # This specific order of making sure we do all production before supply chain movements is key to minimising the amount of cycles it takes to establish supply chains
 
-        if checkList['bread'] == True:
-            log("\nFood supply chain has been established")
-
-        elif checkList['bread'] == False:
-            log("\nFood supply chain has not been established")
 
     def commandLineCycles(self, noOfCycles):
         for i in range(noOfCycles):
@@ -696,10 +753,13 @@ taxBands = [taxFree, basicRate, higherRate, additionalRate]
 
 UK = economy("United Kingdom", 11, 10, "£")
 UKGovernment = government(UK, "United Kingdom's Government", 0, VATrate=0.2, incomeTaxBands=taxBands)
+mySimulation = simulation("UK Simulation", UK)
 
 myBob = consumer(UK, "Bob", 200000)
 myMax = consumer(UK, "Max", 200000)
 myLouis = consumer(UK, "Louis", 200000)
+mySimulation.makeConsumers(15)
+
 
 # Bread Supply Chain
 myFarm = firm(UK, "Bob's Farm", 40000, None, "wheat", 30)
@@ -708,10 +768,8 @@ bakery = firm(UK, "Bob's Bakery", 400000, "wheat", "bread", 30)
 # Housing Supply Chain
 myLoggingCompany = firm(UK, "Bob's Logging Company", 200000, None, "wood", 20)
 constructionMaterialsProducer = firm(UK, "Bob's Construction Materials", 200000, "wood", "construction-material", 30)
-bobTHEBUILDERCANHEFIXIT = firm(UK, "Bob's Builders", 200000000, "construction-material", "house", 0.01)
+bobTHEBUILDERCANHEFIXIT = firm(UK, "Bob's Builders", 200000000, "construction-material", "house", 0.00025)
 
-mySimulation = simulation("UK Simulation", UK)
 
-mySimulation.commandLineCycles(10)
 
-#bob builders is buying wheat????
+mySimulation.commandLineCycles(25)
