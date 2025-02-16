@@ -1,7 +1,17 @@
-import random, string, numpy as np, math
+import random, string, numpy as np, math, os
 
 global randomStrings
 randomStrings = []
+
+def log(message, fileName='output.txt'):
+    if os.path.exists(fileName):
+        myFile = open(fileName, 'a')
+    else:
+        myFile = open(fileName, 'w')
+
+    myFile.write("\n" + message)
+
+    myFile.close()
 
 def get_random_string(length):
     global randomStrings
@@ -28,9 +38,15 @@ class good:
         self.economy = economy
         self.perishable = perishable # eg houses when consumed, continue to exist etc. but food doesnt
         self.rentalProvider = rentalProvider # eg houses can be rented out, but food cannot
+        self.recommendedPrice = 0
 
     def fetchPrice(self):
-        price = self.baseValue * self.economy.totalInflationRate
+        if self.recommendedPrice == 0:
+            price = self.baseValue * self.economy.totalInflationRate
+        elif self.recommendedPrice > 0:
+            price = self.recommendedPrice
+
+        # Price after this is after tax
         if self.economy.government != None:
             price = price * (1 + self.economy.government.VATrate)
         return price
@@ -50,11 +66,7 @@ class economicAgent:
         if debug == True:
             if amount != 0 or amount != 0.0 or amount != -0.0 or amount != -0:
                 roundedAmount = round(amount, 2)
-                if roundedAmount < 0:
-                    readableAmount = f"-{self.economy.currencySymbol}{roundedAmount*-1}"
-                elif roundedAmount > 0:
-                    readableAmount = f"{self.economy.currencySymbol}{roundedAmount}"
-                transactionMessages.append(f"{self.name} having transaction of {readableAmount} applied")
+                transactionMessages.append([self.name, roundedAmount])
 
 class economy:
     def __init__(self, name, population=0, totalCurrencyCirculation=0.0, currencySymbol="$"):
@@ -196,6 +208,7 @@ class consumer(economicAgent):
             netPay = wage - taxDue
 
             firm.changeCash((-1 * wage))
+            firm.cycleCosts += wage
             self.changeCash(netPay)
             firm.totalWorkers += 1
             self.amountWorkedThisUpdate += 1
@@ -209,6 +222,8 @@ class consumer(economicAgent):
                 rentalFirm.inventory.append(good)
                 rentalFirm.orders -= 1
                 self.goods.remove(good)
+
+        self.amountWorkedThisUpdate = 0
 
     def determineProbabilityOfPurchase(self, price, qualityLevel):
         possibleDisposableIncome = self.cash - price
@@ -284,9 +299,10 @@ class consumer(economicAgent):
                 actionMessages.append(f"{self.name} bought their {lackingNeedGood}")
             elif success == False:
                 actionMessages.append(f"{self.name} is unable to buy their {lackingNeedGood} due to a lack of stock")
-            print("\n" + actionMessages[0])
+            
+            log("\n" + actionMessages[0])
             for transaction in transactionMessages:
-                print(f"    {transaction}")
+                log(f"    {transaction}")
             actionMessages = []
             transactionMessages = []
 
@@ -320,6 +336,8 @@ class firm(economicAgent):
         self.orders = 0 # The amount times the buyGood or sellGood function has been called over this firm. this will help them to anticipate demand and buy the suitable amount of input goods
         self.lastUpdateOrders = 0
 
+        self.cycleCosts = 0 # The amount of money spent on expenditure in a cycle. this is neeeded to help the business set prices
+
         # we also need a base wage for every single kind of business. excluding labour costs curetlly at maximum EOS, 600% profit is possible, 15% makes more sense
 
 
@@ -337,7 +355,7 @@ class firm(economicAgent):
             self.baseWage = 12.20
         elif outputGoodName == "construction-material":
             self.blueprintOutputGood = good('construction-material', economy, 1, 'material', 1, 0, False)
-            self.inputRule = 1.3
+            self.inputRule = 3
             self.baseWage = 12.20
         elif outputGoodName == "house":
             self.blueprintOutputGood = good('house', economy, 10, 'accomodation', 0.25, 100, True, perishable=False, rentalProvider=self.name)
@@ -424,9 +442,16 @@ class firm(economicAgent):
     def produce(self, amount:int):
         productionSuccessful = False
         inputGoodsNeeded = self.calculateInputNeed(amount)
-        if inputGoodsNeeded > len(self.inputGoods):
-            pass # Nothing happens as there is not enough to be produced
-        elif inputGoodsNeeded <= len(self.inputGoods):
+        if inputGoodsNeeded > len(self.inputGoods) or (self.totalWorkers*self.outputPerWorker) < amount:
+            maximumOutputPossibleInput = math.floor(len(self.inputGoods) / self.inputRule)
+            maximumOutputPossibleOutputWorker = math.floor(self.totalWorkers * self.outputPerWorker)
+            maximumOutputPossible = min(maximumOutputPossibleInput, maximumOutputPossibleOutputWorker)
+            inputGoodsNeeded = self.calculateInputNeed(maximumOutputPossible)
+            self.changeInputGoods(-1*inputGoodsNeeded)
+            productionSuccessful = False
+            self.changeInventory(maximumOutputPossible)
+
+        elif inputGoodsNeeded <= len(self.inputGoods) and (self.totalWorkers*self.outputPerWorker) >= amount:
             # We do have enough input goods.
             self.changeInputGoods(-1*inputGoodsNeeded)
             productionSuccessful = True
@@ -441,6 +466,7 @@ class firm(economicAgent):
             netPay = wage - taxDue
 
             self.changeCash((-1*wage))
+            self.cycleCosts += wage
             employee.changeCash(netPay)
             self.totalWorkers += 1
             employee.amountWorkedThisUpdate += 1
@@ -454,10 +480,23 @@ class firm(economicAgent):
         transferAmount = self.VATreclaimable
         self.economy.government.changeCash((-1*transferAmount))
         self.changeCash(transferAmount)
+        self.cycleCosts -= transferAmount
         self.VATreclaimable = 0
 
         self.lastUpdateOrders = self.orders
+        
+
+        profitMargin = 0.1
+
+        if self.lastUpdateOrders != 0:
+            self.blueprintOutputGood.recommendedPrice = (((self.cycleCosts) * (profitMargin+1))/self.lastUpdateOrders)*(self.economy.government.VATrate+1)
+        else:
+            self.blueprintOutputGood.recommendedPrice = (((self.cycleCosts) * (profitMargin+1)))*(self.economy.government.VATrate+1)
+
         self.orders = 0
+        self.cycleCosts = 0
+
+        
 
 
     def purchaseInputGoods(self, firm, amount):
@@ -470,6 +509,7 @@ class firm(economicAgent):
 
             self.changeVATReclaimable(VATdue) # Add the VAT due paid on input goods to reclaimable VAT
             self.changeCash(-1 * (amount*price)) # Take a way the cash the value of the money
+            self.cycleCosts += (amount*price)
             firm.changeInventory((-1 * amount)) # Reduce the output goods 
             firm.orders += amount
             firm.changeCash(amount*price-VATdue)
@@ -525,7 +565,7 @@ class firm(economicAgent):
         amountShortOnLabour = labourNeeded - self.totalWorkers
         
         if amountShortOnLabour > 0:
-            actionMessages.append(f"{self.name} is automatically taking on {amountShortOnLabour} workers")
+            actionMessages.append(f"{self.name} is automatically taking on {amountShortOnLabour} workers. ({self.totalWorkers})")
             for i in range(amountShortOnLabour):
                 self.findAndHireWorker() # Find the worket and hire them for one update
 
@@ -538,7 +578,7 @@ class firm(economicAgent):
         if len(self.inventory) > previousInventory and sucessfullProduction == True:
             actionMessages.append(f"{self.name} is automatically producing {amountToProduce} of {self.blueprintOutputGood.name}")
         elif sucessfullProduction == False:
-            actionMessages.append(f"{self.name} is failed to produce {amountToProduce} of {self.blueprintOutputGood.name}")
+            actionMessages.append(f"{self.name} is failed to produce {amountToProduce} of {self.blueprintOutputGood.name}. Inventory Now: {len(self.inventory)}")
 
     def autoManage(self):
         self.autoOrderInputGoods()
@@ -558,25 +598,51 @@ class simulation:
             newConsumer = consumer(self.economy, get_random_string(8), startingMoney)
             self.consumers.append(newConsumer)
 
-    def outputActionsAndTransactions(self, noAction=None):
+    def outputActionsAndTransactions(self, noAction=None, fileName='output.txt'):
+        if os.path.exists(fileName):
+            myFile = open(fileName, 'a')
+        else:
+            myFile = open(fileName, 'w')
+
         global actionMessages
         global transactionMessages
+
+
         if noAction == None:
             noAction = False
 
         if noAction == False:
             if actionMessages != []:
-                print("\n" + actionMessages[0])
+                myFile.write("\n\n" + actionMessages[0])
+
+                transactionTotals = {}
                 for transaction in transactionMessages:
-                    print(f"    {transaction}")
+                    if isinstance(transaction, str):
+                        myFile.write(f"\n    {transaction}")
+                    if isinstance(transaction, list):
+                        if transaction[0] in transactionTotals.keys():
+                            transactionTotals[transaction[0]] += transaction[1]
+                        else:
+                            transactionTotals[transaction[0]] = transaction[1]
+
+                for key in transactionTotals.keys():
+                    amount = round(transactionTotals[key], 2)
+                    if amount < 0:
+                        myFile.write(f"\n    {key} having transaction of -{self.economy.currencySymbol}{-1*amount} applied.")
+                    if amount > 0:
+                        myFile.write(f"\n    {key} having transaction of {self.economy.currencySymbol}{amount} applied.")
+
                 actionMessages = []
                 transactionMessages = []
+
         elif noAction == True:
-            print("\n" + "Taxes:")
+            myFile.write("\n\n" + "Taxes:")
             for transaction in transactionMessages:
-                print(f"    {transaction}")
+                myFile.write(f"\n    {transaction}")
             actionMessages = []
             transactionMessages = []
+
+        myFile.close()
 
     def cycle(self):
         global transactionMessages
@@ -597,20 +663,23 @@ class simulation:
                 self.outputActionsAndTransactions()
                 agent.autoOrderInputGoods()
                 self.outputActionsAndTransactions()
+                
 
         self.economy.update_all()
         self.outputActionsAndTransactions(noAction=True)
+
+        
         # This specific order of making sure we do all production before supply chain movements is key to minimising the amount of cycles it takes to establish supply chains
 
         if checkList['bread'] == True:
-            print("\nFood supply chain has been established")
+            log("\nFood supply chain has been established")
 
         elif checkList['bread'] == False:
-            print("\nFood supply chain has not been established")
+            log("\nFood supply chain has not been established")
 
     def commandLineCycles(self, noOfCycles):
         for i in range(noOfCycles):
-            print(f"\n\nCycle {i+1}")
+            log(f"\n\nCycle {i+1}")
             self.cycle()
 
 
@@ -628,16 +697,18 @@ taxBands = [taxFree, basicRate, higherRate, additionalRate]
 UK = economy("United Kingdom", 11, 10, "£")
 UKGovernment = government(UK, "United Kingdom's Government", 0, VATrate=0.2, incomeTaxBands=taxBands)
 
-myBob = consumer(UK, "Bob", 200)
+myBob = consumer(UK, "Bob", 200000)
+myMax = consumer(UK, "Max", 200000)
+myLouis = consumer(UK, "Louis", 200000)
 
 # Bread Supply Chain
-myFarm = firm(UK, "Bob's Farm", 40, None, "wheat", 30)
-bakery = firm(UK, "Bob's Bakery", 40, "wheat", "bread", 30)
+myFarm = firm(UK, "Bob's Farm", 40000, None, "wheat", 30)
+bakery = firm(UK, "Bob's Bakery", 400000, "wheat", "bread", 30)
 
 # Housing Supply Chain
-myLoggingCompany = firm(UK, "Bob's Logging Company", 200, None, "wood", 30)
-constructionMaterialsProducer = firm(UK, "Bob's Construction Materials", 200, "wood", "construction-material", 30)
-bobTHEBUILDERCANHEFIXIT = firm(UK, "Bob's Builders", 2000, "construction-material", "house", 0.1)
+myLoggingCompany = firm(UK, "Bob's Logging Company", 200000, None, "wood", 20)
+constructionMaterialsProducer = firm(UK, "Bob's Construction Materials", 200000, "wood", "construction-material", 30)
+bobTHEBUILDERCANHEFIXIT = firm(UK, "Bob's Builders", 200000000, "construction-material", "house", 0.01)
 
 mySimulation = simulation("UK Simulation", UK)
 
