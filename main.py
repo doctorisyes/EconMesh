@@ -640,11 +640,12 @@ class firm(economicAgent):
         previousInventory = len(self.inventory)
         amountToProduce = self.lastUpdateOrders-self.rentalsSold # business will produce the amount of goods ordered last update
         
-        sucessfullProduction = self.produce(amountToProduce)
-        if len(self.inventory) > previousInventory and sucessfullProduction == True:
-            actionMessages.append(f"{self.name} is automatically producing {amountToProduce} of {self.blueprintOutputGood.name}")
-        elif sucessfullProduction == False:
-            actionMessages.append(f"{self.name} has failed to produce {amountToProduce} of {self.blueprintOutputGood.name}. Inventory Now: {len(self.inventory)+self.partialInventory}")
+        if amountToProduce > 0:
+            sucessfullProduction = self.produce(amountToProduce)
+            if len(self.inventory) > previousInventory and sucessfullProduction == True:
+                actionMessages.append(f"{self.name} is automatically producing {amountToProduce} of {self.blueprintOutputGood.name}")
+            elif sucessfullProduction == False:
+                actionMessages.append(f"{self.name} has failed to produce {amountToProduce} of {self.blueprintOutputGood.name}. Inventory Now: {len(self.inventory)+self.partialInventory}")
 
     def buyGood(self, firm, amount: int):
         bought = False
@@ -813,9 +814,5 @@ bobTHEBUILDERCANHEFIXIT = firm(UK, "Bob's Builders", 200000000, "construction-ma
 warehouse = good('warehouse', UK, 100000, 'capital', 0.25, 0, False, perishable=False, rentalProvider="Warehouses LTD")
 warehousesLTD = firm(UK, 'Warehouses LTD', 1000000, None, warehouse, 0.00035)
 warehousesLTD.changeInventory(5)
-
-warehousesLTD.sellGoods(bobTHEBUILDERCANHEFIXIT, 1)
-print(bobTHEBUILDERCANHEFIXIT.goods)
-
 
 mySimulation.commandLineCycles(25)
