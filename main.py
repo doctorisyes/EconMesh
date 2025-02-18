@@ -444,6 +444,10 @@ class firm(economicAgent):
             self.changeCash((amount*price-VATdue))
             self.cycleRevenue += (amount*price-VATdue)
             self.changeTaxBeingHeld(VATdue)
+
+            if consumer.type == "firm":
+                consumer.costOfProductionToBeCovered += (amount*price)
+
             for i in range(amount):
                 consumer.goods.append(self.blueprintOutputGood)
                 self.orders += 1
@@ -810,7 +814,7 @@ warehouse = good('warehouse', UK, 100000, 'capital', 0.25, 0, False, perishable=
 warehousesLTD = firm(UK, 'Warehouses LTD', 1000000, None, warehouse, 0.00035)
 warehousesLTD.changeInventory(5)
 
-bobTHEBUILDERCANHEFIXIT.buyGood(warehousesLTD, 1)
+warehousesLTD.sellGoods(bobTHEBUILDERCANHEFIXIT, 1)
 print(bobTHEBUILDERCANHEFIXIT.goods)
 
 
