@@ -315,7 +315,7 @@ class consumer(economicAgent):
 
 class firm(economicAgent):
 
-    def __init__(self, economy, name, cash, inputGoodName, outputGoodName, outputPerWorker, goods=None, inventory=None, partialInventory=None):
+    def __init__(self, economy, name, cash, inputGood, outputGood, outputPerWorker, goods=None, inventory=None, partialInventory=None, inputRule=None):
         if goods == None:
             goods = []
         if inventory == None:
@@ -327,7 +327,7 @@ class firm(economicAgent):
         self.VATreclaimable = 0
         self.inventory = inventory
         
-        self.outputGoodName = outputGoodName
+        
         self.totalWorkers = 0
         self.outputPerWorker = outputPerWorker
         self.inputGoods = []
@@ -343,34 +343,43 @@ class firm(economicAgent):
 
         # we also need a base wage for every single kind of business. excluding labour costs curetlly at maximum EOS, 600% profit is possible, 15% makes more sense
 
+        if (type(outputGood) == str and type(inputGood) == str) or (type(outputGood) == str and inputGood == None):
+            self.outputGoodName = outputGood
+            if outputGood == "bread":
+                self.blueprintOutputGood = good('bread', economy ,1.5, 'food', 0.25, 2, True)
+                self.inputRule = 1.3 # For every 1unit of bread, 1.3 of wheat is required
+                self.baseWage = 12.20
+            elif outputGood == "wheat":
+                self.blueprintOutputGood = good('wheat', economy, 0.25, 'raw', 1, 0, False)
+                self.inputRule = 0 # For every 1unit of Wheat, no input good is required
+                self.baseWage = 12.20
+            elif outputGood == "wood":
+                self.blueprintOutputGood = good('wood', economy, 0.5, 'raw', 1, 0, False)
+                self.inputRule = 0
+                self.baseWage = 17.20
+            elif outputGood == "construction-material":
+                self.blueprintOutputGood = good('construction-material', economy, 1, 'material', 1, 0, False)
+                self.inputRule = 6
+                self.baseWage = 18.20
+            elif outputGood == "house":
+                self.blueprintOutputGood = good('house', economy, 10, 'accomodation', 0.25, 100, True, perishable=False, rentalProvider=self.name)
+                self.inputRule = 900
+                self.baseWage = 20.20
 
-        if outputGoodName == "bread":
-            self.blueprintOutputGood = good('bread', economy ,1.5, 'food', 0.25, 2, True)
-            self.inputRule = 1.3 # For every 1unit of bread, 1.3 of wheat is required
-            self.baseWage = 12.20
-        elif outputGoodName == "wheat":
-            self.blueprintOutputGood = good('wheat', economy, 0.25, 'raw', 1, 0, False)
-            self.inputRule = 0 # For every 1unit of Wheat, no input good is required
-            self.baseWage = 12.20
-        elif outputGoodName == "wood":
-            self.blueprintOutputGood = good('wood', economy, 0.5, 'raw', 1, 0, False)
-            self.inputRule = 0
-            self.baseWage = 17.20
-        elif outputGoodName == "construction-material":
-            self.blueprintOutputGood = good('construction-material', economy, 1, 'material', 1, 0, False)
-            self.inputRule = 6
-            self.baseWage = 18.20
-        elif outputGoodName == "house":
-            self.blueprintOutputGood = good('house', economy, 10, 'accomodation', 0.25, 100, True, perishable=False, rentalProvider=self.name)
-            self.inputRule = 800
-            self.baseWage = 20.20
+            if inputGood == "wheat":
+                self.blueprintInputGood = good('wheat', economy, 0.25, 'raw', 1, 0, False)
+            elif inputGood == "wood":
+                self.blueprintInputGood = good('wood', economy, 0.5, 'raw', 1, 0, False)
+            elif inputGood == "construction-material":
+                self.blueprintInputGood = good('construction-material', economy, 1, 'material', 1, 0, False)
 
-        if inputGoodName == "wheat":
-            self.blueprintInputGood = good('wheat', economy, 0.25, 'raw', 1, 0, False)
-        elif inputGoodName == "wood":
-            self.blueprintInputGood = good('wood', economy, 0.5, 'raw', 1, 0, False)
-        elif inputGoodName == "construction-material":
-            self.blueprintInputGood = good('construction-material', economy, 1, 'material', 1, 0, False)
+        elif (isinstance(outputGood, good) and isinstance(inputGood, good)) or (isinstance(outputGood, good) and inputGood == None):
+            if inputRule == None:
+                self.inputRule = 0
+
+            self.blueprintOutputGood = outputGood
+            self.blueprintInputGood = inputGood
+            self.outputGoodName = self.blueprintOutputGood.name
 
     def changeTaxBeingHeld(self, amount):
         global transactionMessages
@@ -525,8 +534,6 @@ class firm(economicAgent):
         if self.blueprintOutputGood.rentalProvider == None: # Price is payed upfront
             if self.lastUpdateOrders != 0:
                 self.blueprintOutputGood.recommendedPrice = (((self.costOfProductionToBeCovered) * (profitMargin+1))/(self.lastUpdateOrders))*(self.economy.government.VATrate+1)
-            else:
-                self.blueprintOutputGood.recommendedPrice = (((self.costOfProductionToBeCovered) * (profitMargin+1)))*(self.economy.government.VATrate+1)
 
         elif self.blueprintOutputGood.rentalProvider != None: # Price is not the market value of the good
             # if self.blueprintOutputGood.maxUses != None: would be for goods that can be consumed multiple but not unlimited amount of times
@@ -764,12 +771,14 @@ mySimulation.makeConsumers(15)
 # Bread Supply Chain
 myFarm = firm(UK, "Bob's Farm", 40000, None, "wheat", 30)
 bakery = firm(UK, "Bob's Bakery", 400000, "wheat", "bread", 30)
-
 # Housing Supply Chain
 myLoggingCompany = firm(UK, "Bob's Logging Company", 200000, None, "wood", 20)
 constructionMaterialsProducer = firm(UK, "Bob's Construction Materials", 200000, "wood", "construction-material", 30)
-bobTHEBUILDERCANHEFIXIT = firm(UK, "Bob's Builders", 200000000, "construction-material", "house", 0.00025)
+bobTHEBUILDERCANHEFIXIT = firm(UK, "Bob's Builders", 200000000, "construction-material", "house", 0.00035)
 
+warehouse = good('warehouse', UK, 100000, 'capital', 0.25, 0, False, perishable=False, rentalProvider="Warehouses LTD")
+warehousesLTD = firm(UK, 'Warehouses LTD', 1000000, None, warehouse, 0.00035)
+warehousesLTD.changeInventory(5)
 
 
 mySimulation.commandLineCycles(25)
