@@ -487,9 +487,12 @@ class firm(economicAgent):
                 productionSuccessful = True
                 self.changeInventory(amount)
             elif inputGoodsNeeded > len(self.inputGoods) or (self.totalWorkers*self.outputPerWorker) < amount:
-                maximumOutputPossibleFromInput = math.floor(len(self.inputGoods) / self.inputRule)
-                maximumOutputPossibleFromOutputWorker = self.totalWorkers * self.outputPerWorker
-                maximumOutputPossible = min(maximumOutputPossibleFromInput, maximumOutputPossibleFromOutputWorker)
+                if self.inputRule != 0:
+                    maximumOutputPossibleFromInput = math.floor(len(self.inputGoods) / self.inputRule)
+                    maximumOutputPossibleFromOutputWorker = self.totalWorkers * self.outputPerWorker
+                    maximumOutputPossible = min(maximumOutputPossibleFromInput, maximumOutputPossibleFromOutputWorker)
+                elif self.inputRule == 0:
+                    maximumOutputPossible = self.totalWorkers * self.outputPerWorker
                 inputGoodsNeeded = self.calculateInputNeed(maximumOutputPossible)
                 self.changeInputGoods(-1*inputGoodsNeeded)
                 production = False
@@ -808,7 +811,7 @@ warehousesLTD = firm(UK, 'Warehouses LTD', 1000000, None, warehouse, 0.00035)
 warehousesLTD.changeInventory(5)
 
 bobTHEBUILDERCANHEFIXIT.buyGood(warehousesLTD, 1)
-print(bobTHEBUILDERCANHEFIXIT.inventory)
+print(bobTHEBUILDERCANHEFIXIT.goods)
 
 
 mySimulation.commandLineCycles(25)
