@@ -2,6 +2,8 @@ import random, string, numpy as np, math, os
 
 global randomStrings
 randomStrings = []
+transactionMessages = []
+actionMessages = []
 
 def log(message, fileName='output.txt'):
     if os.path.exists(fileName):
@@ -637,6 +639,31 @@ class firm(economicAgent):
         elif sucessfullProduction == False:
             actionMessages.append(f"{self.name} has failed to produce {amountToProduce} of {self.blueprintOutputGood.name}. Inventory Now: {len(self.inventory)+self.partialInventory}")
 
+    def buyGood(self, firm, amount: int):
+        bought = False
+        price = firm.blueprintOutputGood.fetchPrice()
+        if self.cash >= (price*amount) and len(firm.inventory) >= amount:
+            VATdue = (amount*price) * (1-((self.economy.government.VATrate+1)**-1))
+
+            self.changeCash(-1 * (amount*price))
+            self.costOfProductionToBeCovered += (amount*price)
+            firm.changeInventory((-1 * amount))
+            firm.changeCash(amount*price-VATdue)
+            firm.cycleRevenue += (amount*price-VATdue)
+            firm.changeTaxBeingHeld(VATdue)
+            for i in range(amount):
+                self.goods.append(firm.blueprintOutputGood)
+                firm.orders += 1
+            bought = True
+
+            if firm.blueprintOutputGood.rentalProvider != None:
+                firm.rentalsSold += amount
+
+        else:
+            firm.orders += amount
+
+        return bought
+
     def autoManage(self):
         self.autoOrderInputGoods()
         self.autoHireLabour()
@@ -779,6 +806,9 @@ bobTHEBUILDERCANHEFIXIT = firm(UK, "Bob's Builders", 200000000, "construction-ma
 warehouse = good('warehouse', UK, 100000, 'capital', 0.25, 0, False, perishable=False, rentalProvider="Warehouses LTD")
 warehousesLTD = firm(UK, 'Warehouses LTD', 1000000, None, warehouse, 0.00035)
 warehousesLTD.changeInventory(5)
+
+bobTHEBUILDERCANHEFIXIT.buyGood(warehousesLTD, 1)
+print(bobTHEBUILDERCANHEFIXIT.inventory)
 
 
 mySimulation.commandLineCycles(25)
