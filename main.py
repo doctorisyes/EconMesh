@@ -640,11 +640,12 @@ class firm(economicAgent):
         previousInventory = len(self.inventory)
         amountToProduce = self.lastUpdateOrders-self.rentalsSold # business will produce the amount of goods ordered last update
         
-        sucessfullProduction = self.produce(amountToProduce)
-        if len(self.inventory) > previousInventory and sucessfullProduction == True:
-            actionMessages.append(f"{self.name} is automatically producing {amountToProduce} of {self.blueprintOutputGood.name}")
-        elif sucessfullProduction == False:
-            actionMessages.append(f"{self.name} has failed to produce {amountToProduce} of {self.blueprintOutputGood.name}. Inventory Now: {len(self.inventory)+self.partialInventory}")
+        if amountToProduce > 0:
+            sucessfullProduction = self.produce(amountToProduce)
+            if len(self.inventory) > previousInventory and sucessfullProduction == True:
+                actionMessages.append(f"{self.name} is automatically producing {amountToProduce} of {self.blueprintOutputGood.name}")
+            elif sucessfullProduction == False:
+                actionMessages.append(f"{self.name} has failed to produce {amountToProduce} of {self.blueprintOutputGood.name}. Inventory Now: {len(self.inventory)+self.partialInventory}")
 
     def buyGood(self, firm, amount: int):
         bought = False
