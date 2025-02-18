@@ -815,8 +815,4 @@ warehouse = good('warehouse', UK, 100000, 'capital', 0.25, 0, False, perishable=
 warehousesLTD = firm(UK, 'Warehouses LTD', 1000000, None, warehouse, 0.00035)
 warehousesLTD.changeInventory(5)
 
-warehousesLTD.sellGoods(bobTHEBUILDERCANHEFIXIT, 1)
-print(bobTHEBUILDERCANHEFIXIT.goods)
-
-
 mySimulation.commandLineCycles(25)
