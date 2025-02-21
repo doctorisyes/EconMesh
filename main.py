@@ -546,7 +546,8 @@ class firm(economicAgent):
             if self.blueprintOutputGood.rentalProvider == None: # Price is payed upfront
                 self.blueprintOutputGood.recommendedPrice = (((self.costOfProductionToBeCovered) * (profitMargin+1))/(self.lastUpdateOrders))*(self.economy.government.VATrate+1)
 
-            elif self.blueprintOutputGood.rentalProvider != None: # Price is not the market value of the good
+        if self.lastUpdateOrders - self.rentalsSold != 0:
+            if self.blueprintOutputGood.rentalProvider != None: # Price is not the market value of the good
                 # if self.blueprintOutputGood.maxUses != None: would be for goods that can be consumed multiple but not unlimited amount of times
                 if self.blueprintOutputGood.maxUses == None: # Goods that are not having theeir value payed every cycle, and can be used unlimited times eg houses
                     if (len(self.inventory)+self.partialInventory) != 0:
