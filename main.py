@@ -542,18 +542,19 @@ class firm(economicAgent):
         self.profitMargin = 0.1
         profitMargin = self.profitMargin
 
-        if self.blueprintOutputGood.rentalProvider == None: # Price is payed upfront
-            if self.lastUpdateOrders != 0:
+        if self.lastUpdateOrders != 0:
+            if self.blueprintOutputGood.rentalProvider == None: # Price is payed upfront
                 self.blueprintOutputGood.recommendedPrice = (((self.costOfProductionToBeCovered) * (profitMargin+1))/(self.lastUpdateOrders))*(self.economy.government.VATrate+1)
 
-        elif self.blueprintOutputGood.rentalProvider != None: # Price is not the market value of the good
-            # if self.blueprintOutputGood.maxUses != None: would be for goods that can be consumed multiple but not unlimited amount of times
-            if self.blueprintOutputGood.maxUses == None: # Goods that are not having theeir value payed every cycle, and can be used unlimited times eg houses
-                if (len(self.inventory)+self.partialInventory) != 0:
-                    marketValueUpfront = self.costOfProductionToBeCovered/(len(self.inventory)+self.partialInventory)
-                    # Houses take average 20 years of rent to total the value of the house. That's 1040 weeks
-                    weeklyValue = marketValueUpfront / 1040
-                    self.blueprintOutputGood.recommendedPrice = weeklyValue*(profitMargin+1)*(self.economy.government.VATrate+1)
+        if self.lastUpdateOrders - self.rentalsSold != 0:
+            if self.blueprintOutputGood.rentalProvider != None: # Price is not the market value of the good
+                # if self.blueprintOutputGood.maxUses != None: would be for goods that can be consumed multiple but not unlimited amount of times
+                if self.blueprintOutputGood.maxUses == None: # Goods that are not having theeir value payed every cycle, and can be used unlimited times eg houses
+                    if (len(self.inventory)+self.partialInventory) != 0:
+                        marketValueUpfront = self.costOfProductionToBeCovered/(len(self.inventory)+self.partialInventory)
+                        # Houses take average 20 years of rent to total the value of the house. That's 1040 weeks
+                        weeklyValue = marketValueUpfront / 1040
+                        self.blueprintOutputGood.recommendedPrice = weeklyValue*(profitMargin+1)*(self.economy.government.VATrate+1)
 
         self.orders = 0
         self.costOfProductionToBeCovered = self.costOfProductionToBeCovered - self.cycleRevenue
