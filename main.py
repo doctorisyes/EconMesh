@@ -1,19 +1,20 @@
-import random, string, numpy as np, math, os
+import random, string, numpy as np, math, os, tkinter as tk, tkinter.ttk as ttk
 
+cycle_count = 0
 global randomStrings
 randomStrings = []
 transactionMessages = []
 actionMessages = []
 
-def log(message, fileName='output.txt'):
-    if os.path.exists(fileName):
-        myFile = open(fileName, 'a')
-    else:
-        myFile = open(fileName, 'w')
+def log(message, clear=False):
+    log_text.config(state=tk.NORMAL)
 
-    myFile.write("\n" + message)
+    if clear:
+        log_text.delete("1.0", tk.END)
 
-    myFile.close()
+    log_text.insert(tk.END, message)
+    log_text.config(state=tk.DISABLED)
+    log_text.yview(tk.END)
 
 def get_random_string(length):
     global randomStrings
@@ -538,7 +539,8 @@ class firm(economicAgent):
         
         # PRICE DETERMINATION FOR NEXT CYCLE
 
-        profitMargin = 0.1
+        self.profitMargin = 0.1
+        profitMargin = self.profitMargin
 
         if self.blueprintOutputGood.rentalProvider == None: # Price is payed upfront
             if self.lastUpdateOrders != 0:
@@ -688,11 +690,7 @@ class simulation:
             consumer(self.economy, get_random_string(8), startingMoney)
 
     @classmethod
-    def outputActionsAndTransactions(cls, currencySymbol, noAction=None, fileName='output.txt'):
-        if os.path.exists(fileName):
-            myFile = open(fileName, 'a')
-        else:
-            myFile = open(fileName, 'w')
+    def outputActionsAndTransactions(cls, currencySymbol, noAction=None):
 
         global actionMessages
         global transactionMessages
@@ -703,12 +701,12 @@ class simulation:
 
         if noAction == False:
             if actionMessages != []:
-                myFile.write("\n\n" + actionMessages[0])
+                log("\n\n" + actionMessages[0])
 
                 transactionTotals = {}
                 for transaction in transactionMessages:
                     if isinstance(transaction, str):
-                        myFile.write(f"\n    {transaction}")
+                        log(f"\n    {transaction}")
                     if isinstance(transaction, list):
                         if transaction[0] in transactionTotals.keys():
                             transactionTotals[transaction[0]] += transaction[1]
@@ -718,9 +716,9 @@ class simulation:
                 for key in transactionTotals.keys():
                     amount = round(transactionTotals[key], 2)
                     if amount < 0:
-                        myFile.write(f"\n    {key} having transaction of -{currencySymbol}{-1*amount} applied.")
+                        log(f"\n    {key} having transaction of -{currencySymbol}{-1*amount} applied.")
                     if amount > 0:
-                        myFile.write(f"\n    {key} having transaction of {currencySymbol}{amount} applied.")
+                        log(f"\n    {key} having transaction of {currencySymbol}{amount} applied.")
 
                 
 
@@ -728,7 +726,7 @@ class simulation:
             transactionTotals = {}
             for transaction in transactionMessages:
                 if isinstance(transaction, str):
-                    myFile.write(f"\n    {transaction}")
+                    log(f"\n    {transaction}")
                 if isinstance(transaction, list):
                     if transaction[0] in transactionTotals.keys():
                         transactionTotals[transaction[0]] += transaction[1]
@@ -738,48 +736,81 @@ class simulation:
             for key in transactionTotals.keys():
                 amount = round(transactionTotals[key], 2)
                 if amount < 0:
-                    myFile.write(f"\n    {key} having transaction of -{currencySymbol}{-1*amount} applied.")
+                    log(f"\n    {key} having transaction of -{currencySymbol}{-1*amount} applied.")
                 if amount > 0:
-                    myFile.write(f"\n    {key} having transaction of {currencySymbol}{amount} applied.")
+                    log(f"\n    {key} having transaction of {currencySymbol}{amount} applied.")
 
         transactionMessages = []
         actionMessages = []
 
-        myFile.close()
-
-    def cycle(self):
+    def cycle(self, output=True):
+        global cycle_count
         global transactionMessages
         global actionMessages
+        cycle_count += 1
+
+        if output == True:
+            cycle_label.config(text=f"Cycle: {cycle_count}")
+            cycle_label.update_idletasks()
+
+            log(f"--- Cycle {cycle_count} started ---", clear=True)
+
         transactionMessages = []
         actionMessages = []
         # Firstly we need to look at consumers. consumers first drive the needs of the economy, which afects decisions later on in the cycle.
         for agent in self.economy.agents:
             if agent.type == "consumer":
                 agent.meetNeeds()
-                checkList = agent.needsChecklist
 
         for agent in self.economy.agents:
             if agent.type == "firm":
                 agent.autoHireLabour()
-                simulation.outputActionsAndTransactions(self.economy.currencySymbol)
-                agent.autoProduce()
-                simulation.outputActionsAndTransactions(self.economy.currencySymbol)
+                if output == True:
+                    self.outputActionsAndTransactions(self.economy.currencySymbol)
                 agent.autoOrderInputGoods()
-                simulation.outputActionsAndTransactions(self.economy.currencySymbol)
+                
+                if output == True:
+                    self.outputActionsAndTransactions(self.economy.currencySymbol)
+                agent.autoProduce()
+                if output == True:
+                    self.outputActionsAndTransactions(self.economy.currencySymbol)
                 
 
-        log("\nTaxes:")
+        if output == True:
+            log("\nTaxes:")
         self.economy.update_all()
+        self.update_tree()
         
 
         
         # This specific order of making sure we do all production before supply chain movements is key to minimising the amount of cycles it takes to establish supply chains
 
+    def update_tree(self):
+        tree.delete(*tree.get_children())
+        
+        for entity in self.economy.agents:
+            parent = tree.insert('', 'end', text=entity.name, open=False)
+            for key, value in vars(entity).items():
+                tree.insert(parent, 'end', text=f"{key}: {value}")
 
-    def commandLineCycles(self, noOfCycles):
-        for i in range(noOfCycles):
-            log(f"\n\nCycle {i+1}")
-            self.cycle()
+    def multi_cycle(self):
+        try:
+            num_cycles = int(cycle_entry.get())
+            if num_cycles < 1:
+                return
+            if num_cycles > 1:
+                for _ in range(num_cycles-1):
+                    self.cycle(output=False)
+
+                self.cycle(output=True)
+
+            if num_cycles == 1:
+                self.cycle()
+
+
+        except ValueError:
+            log("\nInvalid input! Enter a number.")
+
 
 
 # Defining the tax bands for the UK tax system (these have been adjusted from anuall to hourly)
@@ -807,12 +838,54 @@ mySimulation.makeConsumers(15)
 myFarm = firm(UK, "Bob's Farm", 40000, None, "wheat", 30)
 bakery = firm(UK, "Bob's Bakery", 400000, "wheat", "bread", 30)
 # Housing Supply Chain
-myLoggingCompany = firm(UK, "Bob's Logging Company", 200000, None, "wood", 20)
-constructionMaterialsProducer = firm(UK, "Bob's Construction Materials", 200000, "wood", "construction-material", 30)
+myLoggingCompany = firm(UK, "Bob's Logging Company", 20000000, None, "wood", 20)
+constructionMaterialsProducer = firm(UK, "Bob's Construction Materials", 20000000, "wood", "construction-material", 30)
 bobTHEBUILDERCANHEFIXIT = firm(UK, "Bob's Builders", 200000000, "construction-material", "house", 0.00035)
 
 warehouse = good('warehouse', UK, 100000, 'capital', 0.25, 0, False, perishable=False, rentalProvider="Warehouses LTD")
 warehousesLTD = firm(UK, 'Warehouses LTD', 1000000, None, warehouse, 0.00035)
 warehousesLTD.changeInventory(5)
 
-mySimulation.commandLineCycles(25)
+# GUI setup
+root = tk.Tk()
+root.title("EconMesh")
+root.geometry("1045x350")
+
+# Left frame for Treeview
+left_frame = tk.Frame(root)
+left_frame.pack(side=tk.LEFT, expand=True, fill='both', padx=10, pady=10)
+
+# Right frame for log text
+right_frame = tk.Frame(root)
+right_frame.pack(side=tk.RIGHT, expand=True, fill='both', padx=10, pady=10)
+
+# Cycle counter label
+cycle_label = tk.Label(left_frame, text=f"Cycle: {cycle_count}", font=("Arial", 12, "bold"))
+cycle_label.pack(pady=5)
+
+# Treeview widget
+tree = ttk.Treeview(left_frame)
+tree.pack(expand=True, fill='both')
+
+# Button container (for alignment)
+button_frame = tk.Frame(left_frame)
+button_frame.pack(pady=5)
+
+# "Next Cycle" button
+btn_cycle = tk.Button(button_frame, text="Next Cycle", command=mySimulation.cycle)
+btn_cycle.pack(side=tk.LEFT)
+
+# "Multi-Cycle" button (Runs input number of cycles)
+btn_multi_cycle = tk.Button(button_frame, text="Multi-Cycle", command=mySimulation.multi_cycle)
+btn_multi_cycle.pack(side=tk.LEFT)
+
+# Entry box for multi-cycle count
+cycle_entry = tk.Entry(button_frame, width=5)
+cycle_entry.pack(side=tk.LEFT)
+
+# Log window (Text Widget)
+log_text = tk.Text(right_frame, height=15, width=40, state=tk.DISABLED, wrap=tk.WORD)
+log_text.pack(expand=True, fill='both')
+
+mySimulation.update_tree()
+root.mainloop()
